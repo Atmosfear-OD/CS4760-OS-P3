@@ -18,8 +18,8 @@ Method of invocation:
 */ 
 --------------------------------------------------------
 Problems I encountered:
-1. I worked on this until the very limit of the due date ... so, my code may be a little janky. From what I can tell, everything works fine though.
-2. I do not believe that I have the program temrination method (ctrl+d) working as the professor wants.
+1. The instructions were very confusing -- I tried my best and from what I can tell, everything works fine
+2. I would have liked to have my Project 2 graded before submitting Project 3 so I could have made any necessary improvements...hopefully no problems carried over
 ---------------------------------------------------------
 Github version control web address:
 https://github.com/Atmosfear-OD/CS4760-OS-P3

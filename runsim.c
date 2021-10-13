@@ -15,21 +15,46 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <semaphore.h>
 #include "config.h"
+#include "sem.h"
 
 #define BUFFERSIZE 100
 
 // Shared memory globals
 int shmid;
 struct nLicenses *shm;
+int semid;
 
 int main(int argc, char *argv[]) {
 
 	int numLicenses;
 	int childCount = 0;
 	int terminationTime = 100;  // Runtime for program -- default is 100 seconds
+
 	signal(SIGINT, signalHandler);
-	
+	signal(SIGINT, sigintHandler);
+
+	// Semaphore info
+        key_t semKey;
+        struct sembuf sb;
+        sb.sem_num = 0;         // Only operate on the first element in the semaphore set
+        sb.sem_op = -1;         // Set to allocate resource
+        sb.sem_flg = SEM_UNDO;  // Increment adjust on exit value by abs(sem_op)
+
+        // Initialize semaphore
+        if((semKey = ftok("sem.c", 'J')) == -1) {
+                perror("testsim: Error: ftok ");
+                exit(1);
+        }
+
+	if((semid = initsem(semKey)) == -1) {
+                perror("testsim: Error: initsem ");
+                exit(1);
+        }
+
 	// Error checking for arguments
 	if(argc > 4) {	// Check for too many args
 		printf("runsim: Error: Too many arguments\n");
@@ -43,8 +68,9 @@ int main(int argc, char *argv[]) {
 		printf("or     ./runsim -t sec n < testing.data -- where -t is the opt and sec is an integer greater than or equal to 0\n");
 
 		return 0;
-	}	
-	if(argc == 2) {
+	}
+
+	if(argc == 2 && (strcmp(argv[1], "-t") != 0)) {
 		if(strspn(argv[1], "0123456789") == strlen(argv[1])) {  // Check is n is a number
 			numLicenses = atoi(argv[1]);
 			if(numLicenses <= 0) {
@@ -61,7 +87,7 @@ int main(int argc, char *argv[]) {
 
 			return 0;
 		}	
-	} else if((argc == 3) && strcmp(argv[1], "-t")) {
+	} else if((argc == 3) && (strcmp(argv[1], "-t") == 0)) {
 		printf("runsim: Error: -t specified but no value given\n");
 		printf("Usage: ./runsim n < testing.data -- where n is an integer greater than or equal to 1\n");
                 printf("or     ./runsim -t sec n < testing.data -- where -t is the opt and sec is an integer greater than or equal to 0\n");
@@ -69,6 +95,7 @@ int main(int argc, char *argv[]) {
 		return 0;
 	} else if(argc == 4) {
 		if(strspn(argv[2], "0123456789") == strlen(argv[2])) { 
+			numLicenses = atoi(argv[3]);
 			terminationTime = atoi(argv[2]);
 			if(terminationTime < 0) {
 				printf("runsim: Error: -t sec must be an integer greater than or equal to 0\n");
@@ -153,6 +180,7 @@ int main(int argc, char *argv[]) {
 
         			j = 0;
         			i++;
+
         			// Get repeat factor
        			 	for(i ; i < strlen(lines[index])-1 ; i++) {
                				a3[j] = lines[index][i];
@@ -160,8 +188,22 @@ int main(int argc, char *argv[]) {
         			}
 				i = 0;
 				j = 0;
+				
+				// About to alter license object -- obtaining semaphore
+        			if(semop(semid, &sb, 1) == -1) {
+                			perror("runsim: Error: semop ");
+                			exit(1);
+        			}			
 
-				removelicenses(1);	
+        			removelicenses(1);
+
+        			// Finished altering license object -- releasing semaphore
+        			sb.sem_op = 1;
+        			if(semop(semid, &sb, 1) == -1) {
+                			perror("testsim: Error: semop ");
+                			exit(1);
+			        }
+	
 				pid = fork();
 				child[index] = pid;
 				runningProcesses++;
@@ -183,20 +225,26 @@ int main(int argc, char *argv[]) {
 				execl(progName, "testsim", a2, a3, ch,(char *)NULL);
 				perror("runsim: Error: ");
 			}	
-
-			terminationTime--;
-			sleep(1);
 		} else {
 			printf("runsim: Error: Too many processes running -- killing all then terminating\n");
 			signalHandler();
 			exit(1);
 		}			
 		
+		terminationTime--;
+		if(terminationTime == 0) {
+			printf("runsim: Error: Did not complete all processes before alloted time limit -- terminating remaining child processes\n");
+			signalHandler();
+			exit(1);
+		}
+			
 		shm->processes--;	
 		int check = childCheck(child, childCount);
 		if(check == 1) {
 			break;
 		}
+
+		sleep(1);
 	}
 	
 	// Check if there are any remaining child processes runnning
@@ -208,6 +256,9 @@ int main(int argc, char *argv[]) {
 		killProcesses();
 	}	
 	
+	// Remove semaphore
+	semctl(semid, 0, IPC_RMID);	
+
 	return 0;
 }
 
@@ -235,15 +286,24 @@ int childCheck(pid_t child[], int size) {
 	return 1;
 }
 
-void signalHandler() {
+void signalHandler() {	
 	pid_t id = getpgrp();
 	killProcesses();
 	killpg(id, SIGINT);
-	exit(1);
+	exit(0);
+}
+
+// Catch if user ends program by CTRL+C
+void sigintHandler(int sig_num) {
+	signal(SIGINT, sigintHandler);
+	fflush(stdout);
+	signalHandler();
 }
 
 // Terminate all processes
 void killProcesses() {
+	logmsg("terminate", "", "");
 	shmctl(shmid, IPC_RMID, NULL);
+	semctl(semid, 0, IPC_RMID);
 	shmdt(shm);
 }

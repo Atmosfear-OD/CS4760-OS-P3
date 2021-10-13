@@ -53,12 +53,15 @@ void logmsg(char *pid, char *c, char *repeat) {
 		perror("runsim: Error: ");
 		exit(1);
 	}
-	
-	// Append time
-	addTime(ofptr);
-	
-	// Print msg to file
-	fprintf(ofptr, "%s %s of %s\n", pid, c, repeat);
+
+	if(strcmp(pid, "terminate") == 0) {
+		fprintf(ofptr, "Program terminated at ");
+		addTime(ofptr);  // Append time
+		fprintf(ofptr, "\n");
+	} else {
+		addTime(ofptr); // Append time
+		fprintf(ofptr, "%s %s of %s\n", pid, c, repeat);  // Print msg to file
+	}
 
 	// Close outfile
 	fclose(ofptr);
